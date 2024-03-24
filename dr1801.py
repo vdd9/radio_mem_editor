@@ -2,7 +2,8 @@
 
 import re
 from common import *
-import xlwt, xlrd
+import openpyxl
+from openpyxl.utils import get_column_letter
 
 # note:
 # stangre values after 0x0001C6C0
@@ -86,7 +87,7 @@ class Channel:
         
     @property
     def id(self):
-        return struct.unpack('<H',self.block[0:2])
+        return struct.unpack('<H',self.block[self.offset:self.offset+2])[0]
 
     ## NAME ##
 
@@ -102,8 +103,8 @@ class Channel:
     def __str__(self):
         return f'{self.name}  '+('~','')[self.is_['dmr']]+'('+('low','high')[self.is_['high']]+('-narow','-wide')[self.is_['wide']]+f')\n RX: {(self.rxFreq):0>9.5f}  {self.rxDcs}\n TX: {(self.txFreq):0>9.5f}  {self.txDcs}'
     def __repr__(self):
-        return " ".join([str(b).zfill(3) for b in self.block[self.offset:self.offset+self.channels_size]])\
-        + "\n  ID   |"+("AMA","DMR")[self.is_['dmr']]+"|"+("Low","Hi ")[self.is_['high']]+"| RX: "+f'{(self.rxFreq):0>9.5f} | TX: {(self.txFreq):0>9.5f}'+" |TG |   |PTT|   |Col|Slt|       |Enc| & |DTM|   |Sys|"\
+        return self.name.ljust(12," ")+" ".join([str(b).zfill(3) for b in self.block[self.offset:self.offset+self.channels_size]])\
+        + "\n            ID "+str(self.id).ljust(4," ")+"|"+("AMA","DMR")[self.is_['dmr']]+"|"+("Low","Hi ")[self.is_['high']]+"| RX: "+f'{(self.rxFreq):0>9.5f} | TX: {(self.txFreq):0>9.5f}'+" |TG |   |PTT|   |Col|Slt|       |Enc| & |DTM|   |Sys|"\
         +("NFM","FM ")[self.is_['wide']]+"|autosca|R: "+self.rxDcs.ljust(12)+"|T: "+self.txDcs.ljust(12)+"|               |PID|   |RG |               |lon|"
     def dump(self):
         print("========")
@@ -189,64 +190,165 @@ class DR1801():
             start_addr = 0x0000A33B+0x50*i
             self.scanlist_blocs.append(self.ba[start_addr:start_addr+0x50])
 
-    def importxls(self, path='freqs.xls'):
-        book = xlrd.open_workbook(path)
-        freqs_sheet = book.sheet_by_index(0)
-        chan_ix = 0
-        previous_freq=0.0
-        for rx in range(freqs_sheet.nrows):
-            current_chan = self.channels[chan_ix]
-            current_chan.clear()
-            current_chan.name = freqs_sheet.row(rx)[0].value
-            if freqs_sheet.row(rx)[1].value.startswith('+') or freqs_sheet.row(rx)[1].value.startswith('-'):
-                current_chan.txFreq = previous_freq + float(freqs_sheet.row(rx)[1].value)
-            else:
-                current_chan.txFreq = float(freqs_sheet.row(rx)[1].value)
-            if freqs_sheet.row(rx)[2].value == "":
-                current_chan.rxFreq = current_chan.txFreq
-            else:
-                current_chan.rxFreq = current_chan.txFreq + float(freqs_sheet.row(rx)[2].value)
-            current_chan.txDcs = str(freqs_sheet.row(rx)[3].value)
-            current_chan.rxDcs = str(freqs_sheet.row(rx)[4].value)
-            if freqs_sheet.row(rx)[5].value != "":
-                for boolname in freqs_sheet.row(rx)[5].value.split('/'):
-                    current_chan.is_[boolname] = True
-            if freqs_sheet.row(rx)[6].value != "":
-                for val in freqs_sheet.row(rx)[6].value.split('/'):
-                    k, v = val.split(":")
-                    current_chan.val_of_[k] = int(v)
-            previous_freq=current_chan.txFreq
-            chan_ix +=1
-        self.channels.length =chan_ix
+    def importxls(self, path='freqs.xlsx'):
+        if path.endswith(".xlsx"):
+            book = openpyxl.load_workbook(path)
+            # Parse Channels
+            freqs_sheet = book.worksheets[0]
+            chan_ix = 0
+            previous_freq=0.0
+            self.channels.length = freqs_sheet.max_row
+            for row in freqs_sheet.iter_rows():
+                current_chan = self.channels[chan_ix]
+                current_chan.clear()
+                current_chan.name = row[0].value
+                freq = str(row[1].value)
+                if freq.startswith('+') or freq.startswith('-'):
+                    current_chan.txFreq = previous_freq + float(freq)
+                else:
+                    current_chan.txFreq = float(freq)
+                freq = row[2].value
+                print(row)
+                print(freq)
+                if freq:
+                    current_chan.rxFreq = current_chan.txFreq + float(freq)
+                else:
+                    current_chan.rxFreq = current_chan.txFreq
+                if row[3].value:
+                    current_chan.txDcs = str(row[3].value)
+                if row[4].value:
+                    current_chan.rxDcs = str(row[4].value)
+                if row[5].value:
+                    for boolname in row[5].value.split('/'):
+                        current_chan.is_[boolname] = True
+                if row[6].value:
+                    for val in row[6].value.split('/'):
+                        k, v = val.split(":")
+                        current_chan.val_of_[k] = int(v)
+                previous_freq=current_chan.txFreq
+                chan_ix +=1
+            # Parse Zones
+            zones_sheet = book.worksheets[1]
+            self.zones.length = zones_sheet.max_column
+            for cx in range(1,zones_sheet.max_column+1):
+                current_zone = self.zones[cx-1]
+                current_zone.name = zones_sheet[get_column_letter(cx)+'1'].value
+                current_zone.channels_IDs = [int(c[0].value[8:])-1 for c in zones_sheet[get_column_letter(cx)+'2:'+get_column_letter(cx)+'33'] if c[0].value]
+
+        else:
+            book = xlrd.open_workbook(path)
+            # Parse Channels
+            freqs_sheet = book.sheet_by_index(0)
+            chan_ix = 0
+            previous_freq=0.0
+            self.channels.length = freqs_sheet.nrows
+            for rx in range(freqs_sheet.nrows):
+                current_chan = self.channels[chan_ix]
+                current_chan.clear()
+                current_chan.name = freqs_sheet.row(rx)[0].value
+                freq = str(freqs_sheet.row(rx)[1].value)
+                if freq.startswith('+') or freq.startswith('-'):
+                    current_chan.txFreq = previous_freq + float(freq)
+                else:
+                    current_chan.txFreq = float(freq)
+                freq = str(freqs_sheet.row(rx)[2].value)
+                if freq == "":
+                    current_chan.rxFreq = current_chan.txFreq
+                else:
+                    current_chan.rxFreq = current_chan.txFreq + float(freq)
+                current_chan.txDcs = str(freqs_sheet.row(rx)[3].value)
+                current_chan.rxDcs = str(freqs_sheet.row(rx)[4].value)
+                if freqs_sheet.row(rx)[5].value != "":
+                    for boolname in freqs_sheet.row(rx)[5].value.split('/'):
+                        current_chan.is_[boolname] = True
+                if freqs_sheet.row(rx)[6].value != "":
+                    for val in freqs_sheet.row(rx)[6].value.split('/'):
+                        k, v = val.split(":")
+                        current_chan.val_of_[k] = int(v)
+                previous_freq=current_chan.txFreq
+                chan_ix +=1
+            # Parse Zones
+                print("zone parsing from xls not implemented.")
+        
 
     def save(self):
         self.file.seek(0)
         self.file.write(self.ba)
 
-    def writexls(self, path='freqs.xls'):
-        wb = xlwt.Workbook()
-        freqs_sheet = wb.add_sheet("chan")
-        previous_freq = 0.0
-        row_id = 0
-        for chan in self.channels:
-            freqs_sheet.write(row_id,0,chan.name)
-            if chan.txFreq - previous_freq > 0 and chan.txFreq - previous_freq < 0.06:  
-                freqs_sheet.write(row_id,1,f'+{(chan.txFreq-previous_freq):.5f}')
-            else:
-                freqs_sheet.write(row_id,1,f'{chan.txFreq:0>9.5f}')
-            if chan.rxFreq == chan.txFreq:
-                freqs_sheet.write(row_id,2,'')
-            else:
-                freqs_sheet.write(row_id,2,f'{(chan.rxFreq-chan.txFreq):+.5f}')
-            freqs_sheet.write(row_id,3,f'{chan.txDcs}')
-            freqs_sheet.write(row_id,4,f'{chan.rxDcs}')
-            freqs_sheet.write(row_id,5,'/'.join([k for k,v in chan.is_.items() if v == True]))
-            freqs_sheet.write(row_id,6,'/'.join([f'{k}:{v}' for k,v in chan.val_of_.items() if v != 0]))
-            previous_freq=chan.txFreq
-            row_id += 1
-        for i in range(6):
-            freqs_sheet.col(i).width = 256 * 12
-        wb.save(path)
+    def writexls(self, path='freqs.xlsx'):
+        if path.endswith(".xlsx"):
+            book = openpyxl.Workbook()
+            # Export Channels
+            freqs_sheet = book.active
+            freqs_sheet.title = "chan"
+            freqs_sheet.column_dimensions['A'].width = 11
+            freqs_sheet.column_dimensions['B'].width = 11
+            freqs_sheet.column_dimensions['C'].width = 11
+            freqs_sheet.column_dimensions['F'].width = 11
+            previous_freq = 0.0
+            row_id = 1
+            for chan in self.channels:
+                freqs_sheet.cell(row=row_id,column=1).value = chan.name
+                if chan.txFreq - previous_freq > 0 and chan.txFreq - previous_freq < 0.06:  
+                    freqs_sheet.cell(row=row_id,column=2).value = f'+{(chan.txFreq-previous_freq):.5f}'
+                else:
+                    freqs_sheet.cell(row=row_id,column=2).value = f'{chan.txFreq:0>9.5f}'
+                if chan.rxFreq != chan.txFreq:
+                    freqs_sheet.cell(row=row_id,column=3).value = f'{(chan.rxFreq-chan.txFreq):+.5f}'
+                freqs_sheet.cell(row=row_id,column=4).value = f'{chan.txDcs}'
+                freqs_sheet.cell(row=row_id,column=5).value = f'{chan.rxDcs}'
+                freqs_sheet.cell(row=row_id,column=6).value = '/'.join([k for k,v in chan.is_.items() if v == True])
+                freqs_sheet.cell(row=row_id,column=7).value = '/'.join([f'{k}:{v}' for k,v in chan.val_of_.items() if v != 0])
+                previous_freq=chan.txFreq
+                row_id += 1
+
+            # Export Zones
+            zones_sheet = book.create_sheet("zone")
+            zone_idx = 1
+            for zone in self.zones:
+                zones_sheet.cell(row=1,column=zone_idx).value = zone.name
+                row_idx = 2
+                for idx in zone.channels_IDs:
+                    zones_sheet.cell(row=row_idx,column=zone_idx).value = "=chan!$A"+str(idx+1)
+                    row_idx += 1
+                zone_idx += 1
+
+        else:
+            book = xlwt.Workbook()
+            # Export Channels
+            freqs_sheet = book.add_sheet("chan")
+            previous_freq = 0.0
+            row_id = 0
+            for chan in self.channels:
+                freqs_sheet.write(row_id,0,chan.name)
+                if chan.txFreq - previous_freq > 0 and chan.txFreq - previous_freq < 0.06:  
+                    freqs_sheet.write(row_id,1,f'+{(chan.txFreq-previous_freq):.5f}')
+                else:
+                    freqs_sheet.write(row_id,1,f'{chan.txFreq:0>9.5f}')
+                if chan.rxFreq == chan.txFreq:
+                    freqs_sheet.write(row_id,2,'')
+                else:
+                    freqs_sheet.write(row_id,2,f'{(chan.rxFreq-chan.txFreq):+.5f}')
+                freqs_sheet.write(row_id,3,f'{chan.txDcs}')
+                freqs_sheet.write(row_id,4,f'{chan.rxDcs}')
+                freqs_sheet.write(row_id,5,'/'.join([k for k,v in chan.is_.items() if v == True]))
+                freqs_sheet.write(row_id,6,'/'.join([f'{k}:{v}' for k,v in chan.val_of_.items() if v != 0]))
+                previous_freq=chan.txFreq
+                row_id += 1
+            for i in range(6):
+                freqs_sheet.col(i).width = 256 * 12
+            # Export Zones
+            zones_sheet = book.add_sheet("zone")
+            zone_idx = 0
+            for zone in self.zones:
+                zones_sheet.write(0,zone_idx,zone.name)
+                row_idx = 1
+                for idx in zone.channels_IDs:
+                    zones_sheet.write(row_idx,zone_idx,"=chan!$A"+str(idx+1))
+                    row_idx += 1
+                zone_idx += 1
+
+        book.save(path)
 
     def __del__(self):
         self.file.close()
