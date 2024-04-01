@@ -2,8 +2,6 @@
 
 import re
 from common import *
-import openpyxl
-from openpyxl.utils import get_column_letter
 
 # note:
 # stangre values after 0x0001C6C0
@@ -12,7 +10,7 @@ from openpyxl.utils import get_column_letter
 
 class Zone:
     def __init__(self, id, block, offset, _):
-        struct.pack_into('<H', block, offset+0x24, id)
+        write_short_little_indian(block, offset+0x24, id)
         self.block = block
         self.offset = offset
         self.val_of_ = ByteValueHandler(block, offset, {
@@ -22,12 +20,12 @@ class Zone:
             
     @property
     def channels_IDs(self):
-        return [ struct.unpack('<H',self.block[self.offset+0x28+2*i:self.offset+0x2A+2*i])[0] for i in range(0,self.val_of_['channels_nbr']) ]
+        return [ read_short_little_indian(self.block, self.offset+0x28+2*i) for i in range(0,self.val_of_['channels_nbr']) ]
     @channels_IDs.setter
     def channels_IDs(self, new_list):
         self.val_of_["channels_nbr"] = len(new_list)
         for i in range(0,len(new_list)):
-            struct.pack_into('<H',self.block,self.offset+0x28+2*i,new_list[i])
+            write_short_little_indian(self.block,self.offset+0x28+2*i,new_list[i])
 
     @property
     def name(self):
@@ -46,7 +44,12 @@ class ScanList:
         self.block = block
         self.offset = offset
         self.val_of_ = ByteValueHandler(block, offset, {
-            'channels_nbr': 0x01
+            'channels_nbr': 0x01,
+            'priority1': 0x02, # 0 node, 1 fixed, 2 selected
+            'priority2': 0x03, # 0 node, 1 fixed, 2 selected
+            'txreply': 0x08, # 0 node, 1 fixed, 2 selected
+            'residence': 0x0C, # (Byte*0.5 == DisplayValue) 0.0 to 10.0
+            'txresidence': 0x0D, # (Byte*0.5 == DisplayValue) 0.0 to 10.0
         })
         
     ## ID ##
@@ -55,14 +58,39 @@ class ScanList:
     def id(self):
         return self.block[self.offset]-1
     
+    ## Channels ##
+
     @property
     def channels_IDs(self):
-        return [ struct.unpack('<H',self.block[self.offset+0x30+2*i:self.offset+0x32+2*i])[0] for i in range(0,self.val_of_['channels_nbr']) ]
+        return [ read_short_little_indian(self.block, self.offset+0x30+2*i) for i in range(0,self.val_of_['channels_nbr']) ]
     @channels_IDs.setter
     def channels_IDs(self, new_list):
         self.val_of_["channels_nbr"] = len(new_list)
         for i in range(0,len(new_list)):
-            struct.pack_into('<H',self.block,self.offset+0x28+2*i,new_list[i])
+            write_short_little_indian(self.block,self.offset+0x30+2*i,new_list[i])
+
+    ## Priorities ##
+
+    @property
+    def priority1_channel(self):
+        return read_short_little_indian(self.block,self.offset+0x04)
+    @priority1_channel.setter
+    def priority1_channel(self, value):
+        write_short_little_indian(self.block,self.offset+0x04,value)
+    @property
+    def priority2_channel(self):
+        return read_short_little_indian(self.block,self.offset+0x06)
+    @priority2_channel.setter
+    def priority2_channel(self, value):
+        write_short_little_indian(self.block,self.offset+0x06,value)
+    @property
+    def txreply_channel(self):
+        return read_short_little_indian(self.block,self.offset+0x0A)
+    @txreply_channel.setter
+    def txreply_channel(self, value):
+        write_short_little_indian(self.block,self.offset+0x0A,value)
+
+    ## Name ##
 
     @property
     def name(self):
@@ -77,7 +105,7 @@ class ScanList:
 class Channel:
     channels_size = 0x34
     def __init__(self, id, block, offset, offset_name):
-        struct.pack_into('<H', block, offset, id)
+        write_short_little_indian(block, offset, id)
         self.block = block
         self.offset = offset
         self.offset_name = offset_name
@@ -120,7 +148,7 @@ class Channel:
         
     @property
     def id(self):
-        return struct.unpack('<H',self.block[self.offset:self.offset+2])[0]
+        return read_short_little_indian(self.block, self.offset)
 
     ## NAME ##
 
@@ -166,11 +194,9 @@ class Channel:
         self._set_freq(4, new_freq)
 
     def _freq(self, idx):
-        idx += self.offset
-        return struct.unpack('<I',self.block[idx:idx+4])[0]/1000000
+        return read_int_little_indian(self.block,self.offset+idx)/1000000
     def _set_freq(self, idx, new_freq):
-        idx += self.offset
-        struct.pack_into('<I', self.block, idx, int(new_freq*1000000))
+        write_int_little_indian(self.block, self.offset+idx, int(new_freq*1000000))
 
     ## DCS ##
 
@@ -193,29 +219,28 @@ class Channel:
         if self.block[idx+2] == 0:
             return ''
         elif self.block[idx+2] == 1:
-            return "CTCSS " + str(struct.unpack('<H',self.block[idx:idx+2])[0]/10) + "Hz"
+            return "CTCSS " + str(read_short_little_indian(self.block,idx)/10) + "Hz"
         elif self.block[idx+2] == 2:
-            return "DCS " + str(struct.unpack('<H',self.block[idx:idx+2])[0]) + ("N","I")[self.block[idx+3]]
+            return "DCS " + str(read_short_little_indian(self.block,idx)) + ("N","I")[self.block[idx+3]]
         return "WTF"
     def _set_dcs(self, idx, new_dcs):
         idx += self.offset
         if new_dcs and len(new_dcs)>0:
             if new_dcs.startswith("D"):
                 self.block[idx+2] = 2
-                struct.pack_into('<H', self.block, idx, int(re.findall(r"(\d+)", new_dcs)[0]))
+                write_short_little_indian(self.block, idx, int(re.findall(r"(\d+)", new_dcs)[0]))
                 self.block[idx+3] = new_dcs.endswith("I")
             else:
                 self.block[idx+2] = 1
-                struct.pack_into('<H', self.block, idx, int(float(re.findall(r"(?:\d*\.*\d+)", new_dcs)[0])*10))
+                write_short_little_indian(self.block, idx, int(float(re.findall(r"(?:\d*\.*\d+)", new_dcs)[0])*10))
         else:
-            struct.pack_into('<I', self.block, idx, 0)
+            write_int_little_indian(self.block, idx, 0)
 
 class DR1801():
     def __init__(self,file):
         self.file = file
         self.ba = bytearray(self.file.read())
         self.channels = binaryList(Channel,self.ba,0xA660,0x34,0xA65C,0x00017660,0x14)
-        self.scanlist_number = struct.unpack('<H',self.ba[0x0000A338:0x0000A33A])[0]
         self.scanlists = binaryList(ScanList,self.ba,0xA33C,0x50,0xA338)
         self.zones = binaryList(Zone,self.ba,0x0420,0x68,0x0418)
 
@@ -258,8 +283,25 @@ class DR1801():
         self.zones.length = zones_sheet.max_column
         for cx in range(1,zones_sheet.max_column+1):
             current_zone = self.zones[cx-1]
-            current_zone.name = zones_sheet[get_column_letter(cx)+'1'].value
-            current_zone.channels_IDs = [int(c[0].value[8:])-1 for c in zones_sheet[get_column_letter(cx)+'2:'+get_column_letter(cx)+'33'] if c[0].value]
+            current_zone.name = zones_sheet[openpyxl.utils.get_column_letter(cx)+'1'].value
+            current_zone.channels_IDs = [int(c[0].value[8:])-1 for c in zones_sheet[openpyxl.utils.get_column_letter(cx)+'2:'+openpyxl.utils.get_column_letter(cx)+'33'] if c[0].value]
+        # Parse Scanlists
+        scanlists_sheet = book.worksheets[2]
+        self.scanlists.length = scanlists_sheet.max_column
+        for cx in range(1,scanlists_sheet.max_column+1):
+            current_scanlist = self.scanlists[cx-1]
+            current_scanlist.name = scanlists_sheet[openpyxl.utils.get_column_letter(cx)+'1'].value
+            scan_properties = scanlists_sheet[openpyxl.utils.get_column_letter(cx)+'2:'+openpyxl.utils.get_column_letter(cx)+'9']
+            current_scanlist.val_of_['priority1'] = ('fixed','channel','selected').index(scan_properties[0][0].value)
+            current_scanlist.priority1_channel = int(scan_properties[1][0].value[8:])-1
+            current_scanlist.val_of_['priority2'] = ('fixed','channel','selected').index(scan_properties[2][0].value)
+            current_scanlist.priority2_channel = int(scan_properties[3][0].value[8:])-1
+            current_scanlist.val_of_['txreply'] = ('fixed','channel','selected').index(scan_properties[4][0].value)
+            current_scanlist.txreply_channel = int(scan_properties[5][0].value[8:])-1
+            current_scanlist.val_of_["residence"] = int(float(scan_properties[6][0].value)/0.5)
+            current_scanlist.val_of_["txresidence"] = int(float(scan_properties[7][0].value)/0.5)
+            current_scanlist.channels_IDs = [int(c[0].value[8:])-1 for c in scanlists_sheet[openpyxl.utils.get_column_letter(cx)+'10:'+openpyxl.utils.get_column_letter(cx)+'25'] if c[0].value]
+            current_scanlist.channels_IDs = current_scanlist.channels_IDs
 
     def save(self):
         self.file.seek(0)
@@ -270,44 +312,52 @@ class DR1801():
         # Export Channels
         freqs_sheet = book.active
         freqs_sheet.title = "chan"
-        freqs_sheet.column_dimensions['A'].width = 11
-        freqs_sheet.column_dimensions['B'].width = 11
-        freqs_sheet.column_dimensions['C'].width = 11
-        freqs_sheet.column_dimensions['F'].width = 11
         previous_freq = 0.0
         row_id = 1
         for chan in self.channels:
-            freqs_sheet.cell(row=row_id,column=1).value = chan.name
-            if chan.txFreq - previous_freq > 0 and chan.txFreq - previous_freq < 0.06:  
-                freqs_sheet.cell(row=row_id,column=2).value = f'+{(chan.txFreq-previous_freq):.5f}'
+            freqs_sheet.column_dimensions[openpyxl.utils.get_column_letter(row_id)].width = 15
+            freqs_sheet.cellInput(row_id, 1, chan.name)
+            if chan.txFreq - previous_freq > 0 and chan.txFreq - previous_freq < 0.06:
+                freqs_sheet.cellInput(row_id, 2, f'+{(chan.txFreq-previous_freq):.5f}', 'Could be the shift from previous Channel.')
             else:
-                freqs_sheet.cell(row=row_id,column=2).value = f'{chan.txFreq:0>9.5f}'
+                freqs_sheet.cellInput(row_id, 2, f'{chan.txFreq:0>9.5f}', 'Could be the shift from previous Channel.')
             if chan.rxFreq != chan.txFreq:
-                freqs_sheet.cell(row=row_id,column=3).value = f'{(chan.rxFreq-chan.txFreq):+.5f}'
-            freqs_sheet.cell(row=row_id,column=4).value = f'{chan.txDcs}'
-            freqs_sheet.cell(row=row_id,column=5).value = f'{chan.rxDcs}'
-            freqs_sheet.cell(row=row_id,column=6).value = '/'.join([k for k,v in chan.is_.items() if v == True])
-            freqs_sheet.cell(row=row_id,column=7).value = '/'.join([f'{k}:{v}' for k,v in chan.val_of_.items() if v != 0])
+                freqs_sheet.cellInput(row_id, 3, f'{(chan.rxFreq-chan.txFreq):+.5f}', 'TX shift.\nlet empty if same than RX.')
+            freqs_sheet.cellInput(row_id, 4, f'{chan.txDcs}', 'Starts with \'D\'=> DCS\n + ends with \'I\'=> Inverted.\nElse => Ctcss.')
+            freqs_sheet.cellInput(row_id, 5, f'{chan.rxDcs}', 'Examples:\nCtcss 67.0 Hz / DCS 446 I / Tone 67.0 / T67.0 / D023 / D023I')
+            freqs_sheet.cellInput(row_id, 6, '/'.join([k for k,v in chan.is_.items() if v == True]), '/'.join(chan.is_.keys()))
+            freqs_sheet.cellInput(row_id, 7, '/'.join([f'{k}:{v}' for k,v in chan.val_of_.items() if v != 0]), '/'.join(chan.val_of_.keys()))
             previous_freq=chan.txFreq
             row_id += 1
         # Export Zones
         zones_sheet = book.create_sheet("zone")
         zone_idx = 1
         for zone in self.zones:
-            zones_sheet.cell(row=1,column=zone_idx).value = zone.name
+            zones_sheet.column_dimensions[openpyxl.utils.get_column_letter(zone_idx)].width = 15
+            zones_sheet.cellInput(1, zone_idx, zone.name)
             row_idx = 2
             for idx in zone.channels_IDs:
-                zones_sheet.cell(row=row_idx,column=zone_idx).value = "=chan!$A"+str(idx+1)
+                zones_sheet.cellInput(row_idx, zone_idx, "=chan!$A"+str(idx+1), 'Must refers to the cell like:\n=chan!$A1')
                 row_idx += 1
             zone_idx += 1
         # Export ScanLists
         scanlists_sheet = book.create_sheet("scan")
         scanlists_idx = 1
+        prio = ('fixed','channel','selected')
         for scanlist in self.scanlists:
-            scanlists_sheet.cell(row=1,column=scanlists_idx).value = scanlist.name
-            row_idx = 2
+            scanlists_sheet.column_dimensions[openpyxl.utils.get_column_letter(scanlists_idx)].width = 15
+            scanlists_sheet.cellInput(1, scanlists_idx, scanlist.name)
+            scanlists_sheet.cellInput(2, scanlists_idx, prio[scanlist.val_of_['priority1']],'priority 1:\nfixed\nchannel\nselected')
+            scanlists_sheet.cellInput(3, scanlists_idx, "=chan!$A"+str(scanlist.priority1_channel+1))
+            scanlists_sheet.cellInput(4, scanlists_idx, prio[scanlist.val_of_['priority2']],'priority 2:\nfixed\nchannel\nselected')
+            scanlists_sheet.cellInput(5, scanlists_idx, "=chan!$A"+str(scanlist.priority2_channel+1))
+            scanlists_sheet.cellInput(6, scanlists_idx, prio[scanlist.val_of_['txreply']],'TX Reply:\nfixed\nchannel\nselected')
+            scanlists_sheet.cellInput(7, scanlists_idx, "=chan!$A"+str(scanlist.txreply_channel+1))
+            scanlists_sheet.cellInput(8, scanlists_idx, f'{scanlist.val_of_["residence"]*0.5:.1f}', 'Rx Residence Time')
+            scanlists_sheet.cellInput(9, scanlists_idx, f'{scanlist.val_of_["txresidence"]*0.5:.1f}', 'Tx Residence Time')
+            row_idx = 10
             for idx in scanlist.channels_IDs:
-                scanlists_sheet.cell(row=row_idx,column=scanlists_idx).value = "=chan!$A"+str(idx+1)
+                scanlists_sheet.cellInput(row_idx, scanlists_idx, "=chan!$A"+str(idx+1), 'Must refers to the cell like:\n=chan!$A1')
                 row_idx += 1
             scanlists_idx += 1
         book.save(path)

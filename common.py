@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import struct
+import openpyxl
 
 def estract_string_til_zero(block, limit):
     i = 0
@@ -8,6 +9,27 @@ def estract_string_til_zero(block, limit):
         i+=1
     string = str(block[:i], "utf-8")
     return string
+
+def read_short_little_indian(block, offset):
+    return struct.unpack('<H',block[offset:offset+2])[0]
+
+def write_short_little_indian(block, offset, val):
+    struct.pack_into('<H',block,offset,val)
+
+def read_int_little_indian(block, offset):
+    return struct.unpack('<I',block[offset:offset+4])[0]
+
+def write_int_little_indian(block, offset, val):
+    struct.pack_into('<I',block,offset,val)
+
+
+## Add new methode to excel worksheets
+def myCellInput(self,row,column,value,comment=None):
+    self.cell(row=row,column=column).value = value
+    if comment:
+        self.cell(row=row,column=column).comment = openpyxl.comments.Comment(comment,'')
+openpyxl.worksheet.worksheet.Worksheet.cellInput = myCellInput
+##
 
 class ByteValueHandler:
     '''
