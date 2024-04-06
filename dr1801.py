@@ -10,7 +10,7 @@ from common import *
 
 class Zone:
     def __init__(self, id, block, offset, _):
-        write_short_little_indian(block, offset+0x24, id)
+        block.ushort[offset+0x24] = id
         self.block = block
         self.offset = offset
         self.val_of_ = ByteValueHandler(block, offset, {
@@ -20,12 +20,12 @@ class Zone:
             
     @property
     def channels_IDs(self):
-        return [ read_short_little_indian(self.block, self.offset+0x28+2*i) for i in range(0,self.val_of_['channels_nbr']) ]
+        return [ self.block.ushort[self.offset+0x28+2*i] for i in range(0,self.val_of_['channels_nbr']) ]
     @channels_IDs.setter
     def channels_IDs(self, new_list):
         self.val_of_["channels_nbr"] = len(new_list)
         for i in range(0,len(new_list)):
-            write_short_little_indian(self.block,self.offset+0x28+2*i,new_list[i])
+            self.block.ushort[self.offset+0x28+2*i] = new_list[i]
 
     @property
     def name(self):
@@ -62,33 +62,33 @@ class ScanList:
 
     @property
     def channels_IDs(self):
-        return [ read_short_little_indian(self.block, self.offset+0x30+2*i) for i in range(0,self.val_of_['channels_nbr']) ]
+        return [ self.block.ushort[self.offset+0x30+2*i] for i in range(0,self.val_of_['channels_nbr']) ]
     @channels_IDs.setter
     def channels_IDs(self, new_list):
         self.val_of_["channels_nbr"] = len(new_list)
         for i in range(0,len(new_list)):
-            write_short_little_indian(self.block,self.offset+0x30+2*i,new_list[i])
+            self.block.ushort[self.offset+0x30+2*i] = new_list[i]
 
     ## Priorities ##
 
     @property
     def priority1_channel(self):
-        return read_short_little_indian(self.block,self.offset+0x04)
+        return self.block.ushort[self.offset+0x04]
     @priority1_channel.setter
     def priority1_channel(self, value):
-        write_short_little_indian(self.block,self.offset+0x04,value)
+        self.block.ushort[self.offset+0x04] = value
     @property
     def priority2_channel(self):
-        return read_short_little_indian(self.block,self.offset+0x06)
+        return self.block.ushort[self.offset+0x06]
     @priority2_channel.setter
     def priority2_channel(self, value):
-        write_short_little_indian(self.block,self.offset+0x06,value)
+        self.block.ushort[self.offset+0x06] = value
     @property
     def txreply_channel(self):
-        return read_short_little_indian(self.block,self.offset+0x0A)
+        return self.block.ushort[self.offset+0x0A]
     @txreply_channel.setter
     def txreply_channel(self, value):
-        write_short_little_indian(self.block,self.offset+0x0A,value)
+        self.block.ushort[self.offset+0x0A] = value
 
     ## Name ##
 
@@ -105,7 +105,7 @@ class ScanList:
 class Channel:
     channels_size = 0x34
     def __init__(self, id, block, offset, offset_name):
-        write_short_little_indian(block, offset, id)
+        block[offset]= id+1
         self.block = block
         self.offset = offset
         self.offset_name = offset_name
@@ -148,7 +148,7 @@ class Channel:
         
     @property
     def id(self):
-        return read_short_little_indian(self.block, self.offset)
+        return self.block[self.offset]
 
     ## NAME ##
 
@@ -194,9 +194,9 @@ class Channel:
         self._set_freq(4, new_freq)
 
     def _freq(self, idx):
-        return read_int_little_indian(self.block,self.offset+idx)/1000000
+        return self.block.uint[self.offset+idx]/1000000
     def _set_freq(self, idx, new_freq):
-        write_int_little_indian(self.block, self.offset+idx, int(new_freq*1000000))
+        self.block.uint[self.offset+idx] = int(new_freq*1000000)
 
     ## DCS ##
 
@@ -219,20 +219,20 @@ class Channel:
         if self.block[idx+2] == 0:
             return ''
         elif self.block[idx+2] == 1:
-            return "CTCSS " + str(read_short_little_indian(self.block,idx)/10) + "Hz"
+            return "CTCSS " + str(self.block.ushort[idx]/10) + "Hz"
         elif self.block[idx+2] == 2:
-            return "DCS " + str(read_short_little_indian(self.block,idx)) + ("N","I")[self.block[idx+3]]
+            return "DCS " + str(self.block.ushort[idx]) + ("N","I")[self.block[idx+3]]
         return "WTF"
     def _set_dcs(self, idx, new_dcs):
         idx += self.offset
         if new_dcs and len(new_dcs)>0:
             if new_dcs.startswith("D"):
                 self.block[idx+2] = 2
-                write_short_little_indian(self.block, idx, int(re.findall(r"(\d+)", new_dcs)[0]))
+                self.block.ushort[idx] = int(re.findall(r"(\d+)", new_dcs)[0])
                 self.block[idx+3] = new_dcs.endswith("I")
             else:
                 self.block[idx+2] = 1
-                write_short_little_indian(self.block, idx, int(float(re.findall(r"(?:\d*\.*\d+)", new_dcs)[0])*10))
+                self.block.ushort[idx] = int(float(re.findall(r"(?:\d*\.*\d+)", new_dcs)[0])*10)
         else:
             write_int_little_indian(self.block, idx, 0)
 

@@ -10,26 +10,36 @@ def estract_string_til_zero(block, limit):
     string = str(block[:i], "utf-8")
     return string
 
-def read_short_little_indian(block, offset):
-    return struct.unpack('<H',block[offset:offset+2])[0]
-
-def write_short_little_indian(block, offset, val):
-    struct.pack_into('<H',block,offset,val)
-
-def read_int_little_indian(block, offset):
-    return struct.unpack('<I',block[offset:offset+4])[0]
-
-def write_int_little_indian(block, offset, val):
-    struct.pack_into('<I',block,offset,val)
-
-
 ## Add new methode to excel worksheets
 def myCellInput(self,row,column,value,comment=None):
     self.cell(row=row,column=column).value = value
     if comment:
         self.cell(row=row,column=column).comment = openpyxl.comments.Comment(comment,'')
 openpyxl.worksheet.worksheet.Worksheet.cellInput = myCellInput
-##
+
+## START ## My custom bytearray class ##
+
+class ByteArrayAccesser():
+    def __init__(self, block, item_size, signed=True, litte_indian=True):
+        self.block = block
+        self.item_size = item_size
+        self.struct_format = ('>','<')[litte_indian]+(('','B','H','','I','','','','Q'),('','b','h','','i','','','','q'))[signed][item_size]
+    def __getitem__(self, key):
+        return struct.unpack(self.struct_format,self.block[key:key+self.item_size])[0]
+    def __setitem__(self, key, new_val):
+        struct.pack_into(self.struct_format,self.block,key,new_val)
+
+class MyByteArray(bytearray):
+    def __init__(self, source):
+        super().__init__(source)
+        self.uint = ByteArrayAccesser(self, 4, False)
+        self.ushort = ByteArrayAccesser(self, 2, False)
+        self.ubyte = ByteArrayAccesser(self, 1, False)
+        self.int = ByteArrayAccesser(self, 4)
+        self.short = ByteArrayAccesser(self, 2)
+        self.byte = ByteArrayAccesser(self, 1)
+
+## END ## My custom bytearray class ##
 
 class ByteValueHandler:
     '''
@@ -138,7 +148,7 @@ class BoolHandler:
 class binaryList:
     def __init__(self, ConstructorCallback, bytearray, address, size, length_address, names_address=0, names_size=0):
         self.ConstructorCallback = ConstructorCallback
-        self.ba = bytearray
+        self.ba = MyByteArray(bytearray)
         self.address = address
         self.object_size = size
         self.names_address = names_address
