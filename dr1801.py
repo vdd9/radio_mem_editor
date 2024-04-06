@@ -8,7 +8,7 @@ from common import *
 # encryption 0x0001D7E0
 # VFO sttings 0x0001DD00
 
-class Zone:
+class ZoneDR1801:
     def __init__(self, id, block, offset, _):
         block.ushort[offset+0x24] = id
         self.block = block
@@ -38,7 +38,7 @@ class Zone:
     def __str__(self):
         return f'{self.name}: {self.channels_IDs}'
 
-class ScanList:
+class ScanListDR1801:
     def __init__(self, id, block, offset, _):
         block[offset]= id+1
         self.block = block
@@ -102,7 +102,7 @@ class ScanList:
     def __str__(self):
         return f'{self.name}: {self.channels_IDs}'
 
-class Channel:
+class ChannelDR1801:
     channels_size = 0x34
     def __init__(self, id, block, offset, offset_name):
         block[offset]= id+1
@@ -234,15 +234,15 @@ class Channel:
                 self.block[idx+2] = 1
                 self.block.ushort[idx] = int(float(re.findall(r"(?:\d*\.*\d+)", new_dcs)[0])*10)
         else:
-            write_int_little_indian(self.block, idx, 0)
+            self.block.uint[idx] = 0
 
 class DR1801():
     def __init__(self,file):
         self.file = file
         self.ba = bytearray(self.file.read())
-        self.channels = binaryList(Channel,self.ba,0xA660,0x34,0xA65C,0x00017660,0x14)
-        self.scanlists = binaryList(ScanList,self.ba,0xA33C,0x50,0xA338)
-        self.zones = binaryList(Zone,self.ba,0x0420,0x68,0x0418)
+        self.channels = binaryList(ChannelDR1801,self.ba,0xA660,0x34,0xA65C,0x00017660,0x14)
+        self.scanlists = binaryList(ScanListDR1801,self.ba,0xA33C,0x50,0xA338)
+        self.zones = binaryList(ZoneDR1801,self.ba,0x0420,0x68,0x0418)
 
     def importxlsx(self, path='freqs.xlsx'):
         book = openpyxl.load_workbook(path)
